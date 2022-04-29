@@ -205,10 +205,10 @@ void slack_connect(){
 //  M5.Lcd.println("connect slack.com");
 
 //  webhooktest
-  http.begin( server, 443, "/services/THP92F74L/B03C4SJPR8S/Eav0RRsIn5N7u4S6GKAo5Rkr", slack_root_ca );
+//  http.begin( server, 443, "/services/THP92F74L/B03C4SJPR8S/Eav0RRsIn5N7u4S6GKAo5Rkr", slack_root_ca );
 
 //  HFライン
-//  http.begin( server, 443, "/services/THP92F74L/B03DBEKB3NY/W4N1EmcYWsPwY83Kz3guxKkF", slack_root_ca );
+  http.begin( server, 443, "/services/THP92F74L/B03DBEKB3NY/W4N1EmcYWsPwY83Kz3guxKkF", slack_root_ca );
 
   
   http.addHeader("Content-Type", "application/json" );
