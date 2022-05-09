@@ -210,9 +210,44 @@ void slack_connect(){
 //  HFライン
   http.begin( server, 443, "/services/THP92F74L/B03DBEKB3NY/W4N1EmcYWsPwY83Kz3guxKkF", slack_root_ca );
 
+  String ReturnMSG = "";
+
+  while(ReturnMSG !="200") { //リターン値が、200（正常終了）ではない場合...初期値には""が代入されているので、必ず１回はループする
+
+    //WiFi接続状況を確認する
+    if( WiFi.status() != WL_CONNECTED) {
+      M5.Lcd.fillRect(5,85,150,60,YELLOW);
+      M5.Lcd.setTextSize(2);
+      M5.Lcd.setCursor(6, 86, 1);
+      M5.Lcd.setTextColor(BLACK); 
+      M5.Lcd.printf("Connecting to %s\n", WIFI_SSID);
+      int cnt2 = 0;
+      while(WiFi.status() != WL_CONNECTED) {
+        cnt2++;
+        delay(500);
+        M5.Lcd.print(".");
+        if(cnt2%10==0) {
+          WiFi.disconnect();
+          WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+          M5.Lcd.println("");
+        }
+        if(cnt2>=30) {
+          ESP.restart();
+        }
+      }
+    }
+    //slackへのpost実行
+    http.addHeader("Content-Type", "application/json" );
+    ReturnMSG = http.POST((uint8_t*)json, strlen(json));  
+  }
   
-  http.addHeader("Content-Type", "application/json" );
-  http.POST((uint8_t*)json, strlen(json));
+  
+  Serial.println(ReturnMSG);
+
+  if(ReturnMSG=="200"){
+    Serial.println("slack送信成功！");
+  }
+  
 //  M5.Lcd.println("post hooks.slack.com");
 
 }
