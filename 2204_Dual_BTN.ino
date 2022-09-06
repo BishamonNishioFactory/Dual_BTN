@@ -1,3 +1,40 @@
+//ArduinoJsonのバージョンに注意！
+
+//#include <IOXhop_FirebaseStream.h>
+//#include <IOXhop_FirebaseESP32.h>
+
+//デュアルボタンで自己保持で回転灯を点灯させるプログラム
+
+//https://hooks.slack.com/services/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
+
+//テスト用
+//const String webHook_URL = "/services/THP92F74L/B03C4SJPR8S/Eav0RRsIn5N7u4S6GKAo5Rkr";
+
+//機械場用（m2-pr）
+const String webHook_URL = "/services/THP92F74L/B03T8583Z50/yWxjMz5hNbGOcAUz26FGaH07";
+
+//HPライン
+//const String webHook_URL = "/services/THP92F74L/B03FN9NM56K/XCIuJbt9zXp3rlkWwXdRdxn2"; 
+
+//HFラインエラー
+//const String webHook_URL = "/services/THP92F74L/B03DBEKB3NY/W4N1EmcYWsPwY83Kz3guxKkF";
+
+//仕上ハンドライン
+//const String webHook_URL = "/services/THP92F74L/B03FNCS80VD/dNt13ENC60LnaJzzpiGG1YuD";
+
+//仕上混流ライン
+//const String webHook_URL = "/services/THP92F74L/B03FNAP0J9M/Wd98uBQwFmI1UlvbOxihe8qR";
+
+
+//画面に表示されるエリア記号
+//const String ThisAndon = "HP";
+//const String ThisAndon = "SHF";
+const String ThisAndon = "M2";
+
+
+//2022/5/17
+//Firebaseへの送信失敗時(failed)のリトライを実装するために、ライブラリを従来のものに変更した。
+//slack送信を、３分後にもう一度実行するように変更（１回目はTL。２回目はGM、３回目は生技TL/GM又は工場長が対応する）
 
 
 //2022/4/20
@@ -15,11 +52,13 @@
 #include <WiFiMulti.h>
 #include <HTTPClient.h>
 
-//IOXhop_FirebaseESP32のヘッダーファイルがいつの間にかなくなっていた。
-//ライブラリ https://github.com/ioxhop/IOXhop_FirebaseESP32　からzipを再入手して、IDEからインクルードし直したら治った。　2021/10/25
-#include <IOXhop_FirebaseESP32.h>  
 
-//ArduinoJson のバージョンは、5.13.5であること。
+//https://github.com/mobizt/Firebase-ESP32
+//#include <FirebaseESP32.h>
+
+
+
+//ArduinoJson のバージョンは、5.13.5であること。レイテスト6.19.4が必要なプログラムもある。
 //バージョンが６の場合、エラーとなる。2021/10/25
 #include "ArduinoJson.h"
 
@@ -32,8 +71,47 @@ WiFiClientSecure httpsClient;
 const char* WIFI_SSID = "B_IoT";
 const char* WIFI_PASSWORD = "wF7y82Az";
 
+/// Firebaseに関するもの---------------------------------------------------------
+//当初、Getで採用し始めたこのライブラリを使っていたが、エラー処理がイマイチ理解できなかったので、
+//従来どおり、下記を使用するように改めた。2022/5/17
+
+//FirebaseData firebaseData;
+//const char* const firebase_host = "https://akilog-default-rtdb.firebaseio.com/";
+//const char* const firebase_auth = "wrtVZ4r8zqLIAD930oAnb3m10clHKZmOAVrhwboX";
+
+//const char* const is_power_on_key = "isPowerOn";
+//const char* const is_sent_IR_key = "isSentIR";
 
 
+
+//===Firebase==================================================================
+//なぜか突然送信が出来なくなってしまった。
+//ライブラリーが壊れているとか、プログラムにエラーがあるとか、色々と考えたのだが、
+//RealTimeDatabase のルールで、日付を超えていたから、だった
+//完全ルール無しの、ay-603に変更してみたことで気がついた。／／／情けない 2022/6/10(Fri)
+//2999年6月9日までと改めた。その頃の世の中はいったいどんなだろうか。
+
+//ライブラリ https://github.com/ioxhop/IOXhop_FirebaseESP32　からzipを再入手して、IDEからインクルードし直したら治った。　2021/10/25
+#include <IOXhop_FirebaseESP32.h>  
+
+//#define FIREBASE_DB_URL "https://n-iot-a25db.firebaseio.com/" // 
+#define FIREBASE_DB_URL "https://ay-vue.firebaseio.com/" // 
+//#define FIREBASE_DB_URL "https://iot-sandbox-ea132.firebaseio.com/" // 
+//#define FIREBASE_DB_URL "https://bishamonn1-46718.firebaseio.com/" // 
+//#define FIREBASE_DB_URL "https://ay-603.firebaseio.com/" // 
+//#define FIREBASE_DB_URL "https://akilog-default-rtdb.firebaseio.com/" //
+
+String user_path = "SP_Status";
+String user_path2 = "NishioMachineCT";
+
+unsigned nextFirebaseTry = 0; //1分ごとにセンサーデータを送るためのタイマー
+
+
+
+
+const String JustNowAndonStatus = "JustNowStatus";
+
+//------------------------------------------------------------------------------
 
 //===機械の設定====================================================  
 
@@ -73,13 +151,13 @@ int sMin = 0; // 画面書き換え判定用（分）
 int sHor = 0; // 画面書き換え判定用（時）
 int sDat = 0; //
 //===Firebase==============================================
-#define FIREBASE_DB_URL "https://ay-vue.firebaseio.com/" // 
-
-String user_path = "SP_Status";
-String user_path2 = "NishioMachineCT";
-
-unsigned nextFirebaseTry = 0; //1分ごとにセンサーデータを送るためのタイマー
-
+//#define FIREBASE_DB_URL "https://ay-vue.firebaseio.com/" // 
+//
+//String user_path = "SP_Status";
+//String user_path2 = "NishioMachineCT";
+//
+//unsigned nextFirebaseTry = 0; //1分ごとにセンサーデータを送るためのタイマー
+//
 
 
 //===プログラムで使う変数==================================================================
@@ -167,7 +245,27 @@ int intZangyou = 0;  //残業時間、０時間、１時間、２時間　Bボ�
 
 //○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○○
 const char *server = "hooks.slack.com";
-const char *json = "{\"text\":\"あんどん作動！SHF溶接ライン.\",\"icon_emoji\":\":ghost:\",\"username\":\"m5stackpost\"}";
+
+const String message = "slack emoji test";
+
+//String NowAreaName = "仕上ハンドポンプ〜";
+String NowAreaName = "機械場〜";
+
+//const char *json4 ="{\"text\": \"" + message + "\", \"icon_emoji\": \":space_invader:\"}";
+//const char *json4 ="{\"text\": \"テストです\", \"icon_emoji\": \":space_invader:\"}";
+//const char *json4 ="{\"text\": \"テストです:space_invader:\"}"; //一応は成功か？文章内の絵文字としてスペースインベーダーが現れた！
+const char *json ="{\"text\": \":pig:あんどん作動！TLは現場へ\"}"; //やっぱり成功といえる。本当に実装したいのは、アイコンの方！
+
+//const char *json4 ="{\"icon_emoji\":\":tiger:\",\"text\": \"HPライン送信テストです:snail:\"}"; //やっぱり成功といえる。本当に実装したいのは、アイコンの方！
+
+//const char *json = "{\"text\":\"あんどん作動:ghost！TLは現場へ\",\"icon_emoji\":\":ghost:\",\"username\":\"m5stackpost\"}";
+const char *json2 = "{\"text\":\":frog:【３分超！】GMは至急現場へ\",\"icon_emoji\": \":snail:\"}";
+const char *json3 = "{\"text\":\":panda_face:【６分超！】あら！？生技TL頼みます！\",\"icon_emoji\":\":tiger:\",\"username\":\"m5stackpost\"}";
+
+
+
+bool json2Status = false;
+bool json3Status = false;
 
 //以下はsllackの証明で、全て同じ。
 const char* slack_root_ca= \
@@ -197,18 +295,24 @@ const char* slack_root_ca= \
 
 HTTPClient http;
 
-void slack_connect(){
+void slack_connect(int SendCount){
   M5.Beep.tone(7000);
   delay(50);
   M5.Beep.mute();
   // post slack
 //  M5.Lcd.println("connect slack.com");
 
-//  webhooktest
+
+
+
+//  webhook送信
+  http.begin( server, 443,webHook_URL, slack_root_ca );
 //  http.begin( server, 443, "/services/THP92F74L/B03C4SJPR8S/Eav0RRsIn5N7u4S6GKAo5Rkr", slack_root_ca );
 
 //  HFライン
-  http.begin( server, 443, "/services/THP92F74L/B03DBEKB3NY/W4N1EmcYWsPwY83Kz3guxKkF", slack_root_ca );
+//  http.begin( server, 443, "/services/THP92F74L/B03DBEKB3NY/W4N1EmcYWsPwY83Kz3guxKkF", slack_root_ca );
+
+
 
   String ReturnMSG = "";
 
@@ -236,9 +340,23 @@ void slack_connect(){
         }
       }
     }
+
+
+
     //slackへのpost実行
     http.addHeader("Content-Type", "application/json" );
-    ReturnMSG = http.POST((uint8_t*)json, strlen(json));  
+    switch(SendCount){
+      case 0:
+            ReturnMSG = http.POST((uint8_t*)json, strlen(json));  
+            break;
+      case 1:
+            ReturnMSG = http.POST((uint8_t*)json2, strlen(json2));  
+            break;
+      case 2:
+            ReturnMSG = http.POST((uint8_t*)json3, strlen(json3));  
+            break;
+    }
+    
   }
   
   
@@ -258,6 +376,17 @@ void printLocalTime() {
 
   if(RunBool2==true){
     incrementSeconds ++;
+    
+    if(incrementSeconds>180 && json2Status==false){
+      slack_connect(1);
+      json2Status=true;
+    }
+    
+    if(incrementSeconds>360 && json3Status==false){
+      slack_connect(2);
+      json3Status=true;
+    }
+    
 //    Serial.println(incrementSeconds);  
     digitalWrite(LED_pin,LOW);        //内蔵LEDは、LOWで点灯
     delay(50);
@@ -275,11 +404,20 @@ void printLocalTime() {
   
   if (sMin == RTC_TimeStruct.Minutes) {
     // 秒の表示エリアだけ書き換え
-    
-    M5.Lcd.fillRect(140,5,150,70,BLACK);
-
+    if(RunBool2){
+       M5.Lcd.fillRect(140,5,150,70,BLUE);
+    }else{
+       M5.Lcd.fillRect(140,5,150,70,BLACK);
+    }
+   
   } else {
-      M5.Lcd.fillScreen(BLACK);
+    if(RunBool2){
+          M5.Lcd.fillScreen(BLUE);
+//       M5.Lcd.fillRect(140,5,150,70,BLUE);
+    }else{
+       M5.Lcd.fillScreen(BLACK);
+    }
+      
 
 
   }
@@ -298,7 +436,7 @@ void printLocalTime() {
   M5.Lcd.setCursor(150, 100, 1);  //x,y,font 1:Adafruit 8ピクセルASCIIフォント
   M5.Lcd.setTextSize(3);
   M5.Lcd.setTextColor(CYAN);
-  M5.Lcd.print(MachineNo);
+  M5.Lcd.print(ThisAndon);
   //日付の表示^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   M5.Lcd.setCursor(30, 67, 1);  //x,y,font 1:Adafruit 8ピクセルASCIIフォント
   M5.Lcd.setTextSize(2);
@@ -352,13 +490,49 @@ void wifiConnect(){
   M5.Lcd.fillScreen(BLACK);
 }
 //◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆
+void FirebaseAndonSend(bool NowStatus){
+  M5.Lcd.setCursor(0,0);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.printf("Send to Firebase");
+  int FirebaseAndonCount =0;
+  Firebase.set("/AndonStatus/"+JustNowAndonStatus,NowStatus);
+  while(Firebase.failed()){
+    FirebaseAndonCount ++;
+    Serial.print("★★★Firebase 送信失敗★★★リトライ");
+    Serial.print(FirebaseAndonCount);
+    Serial.println(Firebase.error());  
+//      Serial.println(String(t) + "000");
+    
+    delay(500);
+    M5.Lcd.print(".");
+    if(FirebaseAndonCount%10==0){       //500msecX１０回で５秒経過
+      M5.Lcd.println("");
+      M5.Lcd.println("Send to Firebase"+FirebaseAndonCount);
+      Serial.println("Firebase 再送信実行！");
+      //WiFiを検査し、切断されている場合は再接続を試みる””””””””””””””””””””””””””””””””””””””
+      while(WiFi.status() != WL_CONNECTED) {
+        Serial.println("wifi再接続実行！"); 
+        wifiConnect();
+      }
+      Firebase.set("/AndonStatus/"+JustNowAndonStatus,NowStatus);
+    }
+
+    
+
+    if(FirebaseAndonCount >100){
+      Serial.print("リトライが100回を超過しました。再起動します");
+      M5.Lcd.fillScreen(RED);
+      M5.Lcd.printf("Restart later 5sec");
+      delay(5000);
+      ESP.restart();
+      break;
+    }
+  }
 
 
+}
 
 //◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆◆
-//デュアルボタンで自己保持で回転灯を点灯させるプログラム
-
-
 
 void setup() {
 
@@ -370,7 +544,7 @@ void setup() {
   Serial.println("ここまでオッケー");
   wifiConnect();
   Serial.println("どうなんでしょうか");
-  Firebase.begin(FIREBASE_DB_URL);   // ④
+//  Firebase.begin(FIREBASE_DB_URL);   // ④
   
   configTime( JST, 0, "ntp.nict.jp", "ntp.jst.mfeed.ad.jp");
 
@@ -435,30 +609,36 @@ void setup() {
  pinMode(LED_pin2,OUTPUT);
 
  digitalWrite(LED_pin,HIGH);
+
+// Firebase.begin(firebase_host, firebase_auth);
+Firebase.begin(FIREBASE_DB_URL);   // ④
+// Firebase.reconnectWiFi(true);
+
  
 }
 
 void loop() {
 
  M5.update();
+  
+   //WiFiを検査し、切断されている場合は再接続を試みる””””””””””””””””””””””””””””””””””””””
+  while(WiFi.status() != WL_CONNECTED) { 
+    wifiConnect();
+  }
 
     if(M5.BtnA.wasPressed()){
-      slack_connect();
+      slack_connect(0);
 //      String message = "A button";
 //      int MyRand = 16581265 - random(23);
 //      lineNotify(message, stickerPackage3, MyRand);
     }
   
-    if(M5.BtnA.wasPressed()){
 
-//      String message = "A button";
-//      int MyRand = 16581265 - random(23);
-//      lineNotify(message, stickerPackage3, MyRand);
-    }
 
     if(M5.BtnB.wasPressed()){
 //      intZangyouPrint(true);
 //      delay(10);
+        ESP.restart();
     }
 
   int btnA = M5.BtnA.pressedFor(1000); // ホームボタン
@@ -511,18 +691,28 @@ void loop() {
 
     M5.update();
 
-  if(digitalRead(B_switch)==LOW){
+ if(digitalRead(B_switch)==LOW){
     cur_value1 = digitalRead(B_switch);
     delay(300);
     cur_value2 = digitalRead(B_switch);
     if(cur_value1==cur_value1){
       if(RunBool1){
-        Serial.println("❏❏❏❏❏❏❏点灯！");
-        
+
+        M5.Lcd.fillScreen(BLUE);
         digitalWrite(LED_pin2,HIGH);      //外付けパトライトは、HIGH で通電
+//        Firebase.set("/AndonStatus/"+ThisAndon,true);
+        FirebaseAndonSend(true);
+
+        Serial.println("❏❏❏❏❏❏❏点灯！");
+         
+        delay(100);
         incrementSeconds = 0;
         RunBool2=true;  //起動後の秒数を、 incrementSecondsに足し込むためのトリガー
-        slack_connect(); //スラック送信
+        json2Status=false; //３分超メッセージのステータス
+        json3Status=false; //６分超メッセージのステータス
+        slack_connect(0); //スラック送信        
+        
+//        Firebase.setBool(firebaseData, is_power_on_key,true);
 //        M5.Lcd.fillCircle(200, 110, 20, CYAN);
 //        M5.Lcd.drawCircle(225, 45, 14, BLUE);
         
@@ -539,13 +729,22 @@ void loop() {
 
     
   }else if(!RunBool1){
+    M5.Lcd.fillScreen(RED);
+    digitalWrite(LED_pin2,LOW);
+    delay(100);
+//    Firebase.set("/AndonStatus/"+ThisAndon,false);
+    FirebaseAndonSend(false);
+
     Serial.println("RunBoolの値その２");
     Serial.print(RunBool1);
 
   
     Serial.print("消灯ーーーーーーー");
-
-    digitalWrite(LED_pin2,LOW);
+    
+    delay(500);
+    M5.Lcd.fillScreen(BLACK);
+    
+//    Firebase.setBool(firebaseData, is_power_on_key,false);  //Firebaseに、falseを代入
     RunBool1 = true;                    //これを入れることで、繰り返しが無くなる
   }
 
